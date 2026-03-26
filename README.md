@@ -15,7 +15,7 @@ automatically detects when VMs are started, stopped, or have their IPs changed.
 
 - **Automatic service discovery** - Finds all running VMs and containers in your Proxmox cluster
 - **DNS resolution** - Access your VMs and containers by name (e.g., `vm-name.lab.local`)
-- **IPv4 and IPv6 support** - Creates both A and AAAA records
+- **IPv4 and IPv6 support** - Creates both A and AAAA records by default, with an option to disable IPv6
 - **Flexible filtering** - Filter services by type, tags, or networks
 - **Web debug interface** - View DNS records and configuration in a simple web UI
 
@@ -78,6 +78,7 @@ go build
 - `--tcp`: Enable TCP listener (default: true)
 - `--debug-addr`: Address for HTTP debug interface (e.g., `:8080`)
 - `--verbose`: Enable verbose logging
+- `--disable-ipv6`: Disable publishing IPv6 AAAA records
 - `--cache-path`: Path to cache file; if set, the program will save its state
   to this file and load it on startup if the initial fetch from Proxmox fails.
 

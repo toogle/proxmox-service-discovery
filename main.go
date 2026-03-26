@@ -37,6 +37,7 @@ var (
 	verbose      = pflag.BoolP("verbose", "v", false, "verbose output")
 	logResponses = pflag.Bool("log-responses", false, "log all responses from Proxmox")
 	tlsNoVerify  = pflag.Bool("tls-no-verify", false, "disable TLS certificate verification")
+	disableIPv6  = pflag.Bool("disable-ipv6", false, "disable publishing AAAA records")
 
 	// DNS server configuration
 	addr = pflag.StringP("addr", "a", ":53", "address to listen on for DNS")
@@ -152,12 +153,13 @@ func main() {
 	}))
 
 	server, err := newServer(Options{
-		Host:       *proxmoxHost,
-		DNSZone:    *dnsZone,
-		Auth:       auth,
-		DebugAddr:  *debugAddr,
-		CachePath:  *cachePath,
-		HTTPClient: httpc,
+		Host:        *proxmoxHost,
+		DNSZone:     *dnsZone,
+		Auth:        auth,
+		DebugAddr:   *debugAddr,
+		CachePath:   *cachePath,
+		HTTPClient:  httpc,
+		DisableIPv6: *disableIPv6,
 	})
 	if err != nil {
 		pvelog.Fatal(logger, "error creating server", pvelog.Error(err))
@@ -223,14 +225,15 @@ func main() {
 
 type server struct {
 	// config
-	host      string
-	dnsZone   string // with trailing dot
-	auth      pveapi.AuthProvider
-	client    pveapi.Client
-	fc        *FilterConfig
-	filt      *Filter
-	debugAddr string
-	cachePath string
+	host        string
+	dnsZone     string // with trailing dot
+	auth        pveapi.AuthProvider
+	client      pveapi.Client
+	fc          *FilterConfig
+	filt        *Filter
+	debugAddr   string
+	cachePath   string
+	disableIPv6 bool
 
 	dnsMux *dns.ServeMux // immutable
 	httpc  *http.Client  // immutable, for Proxmox API
@@ -275,6 +278,10 @@ type Options struct {
 	//
 	// This field is optional. If empty, no cache will be used.
 	CachePath string
+	// DisableIPv6 disables publishing AAAA records.
+	//
+	// This field is optional. If empty, AAAA records will be published.
+	DisableIPv6 bool
 }
 
 // newServer creates a new server instance with the given configuration
@@ -298,16 +305,17 @@ func newServer(opts Options) (*server, error) {
 	}
 
 	s := &server{
-		host:      opts.Host,
-		dnsZone:   opts.DNSZone,
-		auth:      opts.Auth,
-		client:    pveapi.NewClient(httpc, opts.Host, opts.Auth),
-		httpc:     httpc,
-		fc:        fc,
-		filt:      filt,
-		dnsMux:    dns.NewServeMux(),
-		debugAddr: opts.DebugAddr,
-		cachePath: opts.CachePath,
+		host:        opts.Host,
+		dnsZone:     opts.DNSZone,
+		auth:        opts.Auth,
+		client:      pveapi.NewClient(httpc, opts.Host, opts.Auth),
+		httpc:       httpc,
+		fc:          fc,
+		filt:        filt,
+		dnsMux:      dns.NewServeMux(),
+		debugAddr:   opts.DebugAddr,
+		cachePath:   opts.CachePath,
+		disableIPv6: opts.DisableIPv6,
 	}
 
 	// Initialize the DNS request handler
@@ -363,7 +371,7 @@ func (s *server) updateDNSRecords(ctx context.Context) error {
 				}
 				rr.A = addr.AsSlice()
 				answers = append(answers, rr)
-			} else if addr.Is6() {
+			} else if addr.Is6() && !s.disableIPv6 {
 				rr := new(dns.AAAA)
 				rr.Hdr = dns.RR_Header{
 					Name:   fqdn,
@@ -374,6 +382,11 @@ func (s *server) updateDNSRecords(ctx context.Context) error {
 				rr.AAAA = addr.AsSlice()
 				answers = append(answers, rr)
 			}
+		}
+		if len(answers) == 0 {
+			logger.Warn("no addresses for resource to publish after filtering out IPv6", "fqdn", fqdn)
+			noAddrs = append(noAddrs, fqdn)
+			continue
 		}
 
 		records[fqdn] = record{
